@@ -1,10 +1,13 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ArrowRight, Lock, Mail, CheckCircle2 } from "lucide-react";
+import { ChevronLeft, ArrowRight, Lock, Mail, CheckCircle2, Loader2 } from "lucide-react";
+import { useAuth } from "../context/useAuth.js";
+import { api, errorMsg } from "../lib/api.js";
 
 const AuthPage = () => {
   const [view, setView] = useState("login"); // 'login' | 'signup' | 'otp'
+  const [signupData, setSignupData] = useState(null); // { name, email, password } passed to OTP step
 
   return (
     <div className="flex min-h-screen w-full overflow-hidden bg-white font-sans text-[#111827]">
@@ -30,10 +33,21 @@ const AuthPage = () => {
               <LoginForm key="login" onSwitch={() => setView("signup")} />
             )}
             {view === "signup" && (
-              <SignUpForm key="signup" onSwitch={() => setView("login")} onNext={() => setView("otp")} />
+              <SignUpForm
+                key="signup"
+                onSwitch={() => setView("login")}
+                onNext={(data) => {
+                  setSignupData(data);
+                  setView("otp");
+                }}
+              />
             )}
             {view === "otp" && (
-              <OTPForm key="otp" onBack={() => setView("signup")} />
+              <OTPForm
+                key="otp"
+                signup={signupData}
+                onBack={() => setView("signup")}
+              />
             )}
           </AnimatePresence>
         </div>
@@ -68,9 +82,31 @@ const AuthPage = () => {
 };
 
 /* ==============================================================
-   LOGIN FORM
+   LOGIN FORM — real API
 ============================================================== */
 const LoginForm = ({ onSwitch }) => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setBusy(true);
+    setError("");
+    try {
+      await login(email.trim(), password);
+      navigate("/design");
+    } catch (err) {
+      setError(errorMsg(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -86,11 +122,14 @@ const LoginForm = ({ onSwitch }) => {
         Enter your details to access your workspace.
       </p>
 
-      <form className="mt-[40px] flex flex-col gap-[20px]" onSubmit={(e) => e.preventDefault()}>
+      <form className="mt-[40px] flex flex-col gap-[20px]" onSubmit={submit}>
         <div className="relative">
           <Mail className="absolute left-[20px] top-1/2 -translate-y-1/2 text-[#98a2b3]" size={20} />
           <input
             type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             placeholder="Email address"
             className="h-[60px] w-full rounded-[16px] bg-[#f8fafc] pl-[56px] pr-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
@@ -100,22 +139,27 @@ const LoginForm = ({ onSwitch }) => {
           <Lock className="absolute left-[20px] top-1/2 -translate-y-1/2 text-[#98a2b3]" size={20} />
           <input
             type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             className="h-[60px] w-full rounded-[16px] bg-[#f8fafc] pl-[56px] pr-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
         </div>
 
-        <div className="flex items-center justify-between text-[14px]">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" className="h-[18px] w-[18px] rounded-[6px] border-[#d1d5db] text-[#5148e9] focus:ring-[#5148e9]" />
-            <span className="font-medium text-[#475467]">Remember me</span>
-          </label>
-          <a href="#" className="font-bold text-[#5148e9] hover:underline">Forgot password?</a>
-        </div>
+        {error && <p className="rounded-[12px] bg-red-50 px-4 py-3 text-[13px] font-medium text-red-600">{error}</p>}
 
-        <button className="group relative mt-[10px] flex h-[60px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#111827] text-[16px] font-bold text-white transition-all hover:bg-black hover:shadow-[0_15px_30px_rgba(17,24,39,.25)] active:scale-[0.98]">
-          Log In
-          <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+        <button
+          type="submit"
+          disabled={busy}
+          className="group relative mt-[10px] flex h-[60px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#111827] text-[16px] font-bold text-white transition-all hover:bg-black hover:shadow-[0_15px_30px_rgba(17,24,39,.25)] active:scale-[0.98] disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={18} className="animate-spin" /> : (
+            <>
+              Log In
+              <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+            </>
+          )}
         </button>
       </form>
 
@@ -130,12 +174,32 @@ const LoginForm = ({ onSwitch }) => {
 };
 
 /* ==============================================================
-   SIGN UP FORM
+   SIGN UP FORM — sends OTP to email, then proceeds to OTP step
 ============================================================== */
 const SignUpForm = ({ onSwitch, onNext }) => {
-  const handleSubmit = (e) => {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onNext(); // Proceed to OTP
+    if (String(password).length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.post("/auth/send-otp", { email: email.trim(), purpose: "register" });
+      onNext({ name: `${firstName.trim()} ${lastName.trim()}`.trim(), email: email.trim(), password });
+    } catch (err) {
+      setError(errorMsg(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -159,12 +223,16 @@ const SignUpForm = ({ onSwitch, onNext }) => {
             type="text"
             placeholder="First name"
             required
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
             className="h-[60px] w-1/2 rounded-[16px] bg-[#f8fafc] px-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
           <input
             type="text"
             placeholder="Last name"
             required
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
             className="h-[60px] w-1/2 rounded-[16px] bg-[#f8fafc] px-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
         </div>
@@ -175,6 +243,8 @@ const SignUpForm = ({ onSwitch, onNext }) => {
             type="email"
             placeholder="Email address"
             required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             className="h-[60px] w-full rounded-[16px] bg-[#f8fafc] pl-[56px] pr-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
         </div>
@@ -185,13 +255,25 @@ const SignUpForm = ({ onSwitch, onNext }) => {
             type="password"
             placeholder="Create a password"
             required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             className="h-[60px] w-full rounded-[16px] bg-[#f8fafc] pl-[56px] pr-[20px] text-[15px] font-medium text-[#111827] outline-none transition-all focus:bg-white focus:ring-2 focus:ring-[#5148e9]/20"
           />
         </div>
 
-        <button type="submit" className="group relative mt-[10px] flex h-[60px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#5148e9] text-[16px] font-bold text-white shadow-[0_15px_30px_rgba(81,72,233,.25)] transition-all hover:bg-[#4338ca] active:scale-[0.98]">
-          Continue
-          <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+        {error && <p className="rounded-[12px] bg-red-50 px-4 py-3 text-[13px] font-medium text-red-600">{error}</p>}
+
+        <button
+          type="submit"
+          disabled={busy}
+          className="group relative mt-[10px] flex h-[60px] w-full items-center justify-center gap-2 rounded-[16px] bg-[#5148e9] text-[16px] font-bold text-white shadow-[0_15px_30px_rgba(81,72,233,.25)] transition-all hover:bg-[#4338ca] active:scale-[0.98] disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={18} className="animate-spin" /> : (
+            <>
+              Continue
+              <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
+            </>
+          )}
         </button>
       </form>
 
@@ -206,12 +288,17 @@ const SignUpForm = ({ onSwitch, onNext }) => {
 };
 
 /* ==============================================================
-   OTP VERIFICATION FORM
+   OTP VERIFICATION FORM — verifies via API, then registers
 ============================================================== */
-const OTPForm = ({ onBack }) => {
+const OTPForm = ({ signup, onBack }) => {
+  const navigate = useNavigate();
+  const { register } = useAuth();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [error, setError] = useState("");
+  const [resending, setResending] = useState(false);
+  const [devOtp, setDevOtp] = useState("");
   const inputsRef = useRef([]);
 
   const handleChange = (e, index) => {
@@ -233,15 +320,40 @@ const OTPForm = ({ onBack }) => {
     }
   };
 
-  const handleVerify = (e) => {
+  const handleVerify = async (e) => {
     e.preventDefault();
-    if (otp.join("").length === 6) {
-      setIsVerifying(true);
-      setTimeout(() => {
-        setIsVerifying(false);
-        setIsSuccess(true);
-        // After 2s redirect or show success
-      }, 1500);
+    if (otp.join("").length !== 6) return;
+    setIsVerifying(true);
+    setError("");
+    try {
+      await api.post("/auth/verify-otp", {
+        email: signup.email,
+        code: otp.join(""),
+        purpose: "register",
+      });
+      await register(signup.name, signup.email, signup.password, otp.join(""));
+      setIsSuccess(true);
+      setTimeout(() => navigate("/design"), 1500);
+    } catch (err) {
+      setError(errorMsg(err));
+      setOtp(["", "", "", "", "", ""]);
+      inputsRef.current[0]?.focus();
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const resend = async () => {
+    setResending(true);
+    setError("");
+    try {
+      const { data } = await api.post("/auth/send-otp", { email: signup.email, purpose: "register" });
+      if (data.devOtp) setDevOtp(data.devOtp);
+      setOtp(["", "", "", "", "", ""]);
+    } catch (err) {
+      setError(errorMsg(err));
+    } finally {
+      setResending(false);
     }
   };
 
@@ -281,7 +393,7 @@ const OTPForm = ({ onBack }) => {
         Verify email
       </h1>
       <p className="mt-2 text-[15px] text-[#667085]">
-        We sent a 6-digit code to your email.
+        We sent a 6-digit code to <span className="font-semibold text-[#111827]">{signup?.email}</span>.
         <br />
         Enter it below to confirm your account.
       </p>
@@ -302,17 +414,20 @@ const OTPForm = ({ onBack }) => {
           ))}
         </div>
 
-        <button 
-          type="submit" 
+        {error && <p className="rounded-[12px] bg-red-50 px-4 py-3 text-[13px] font-medium text-red-600">{error}</p>}
+        {devOtp && (
+          <p className="rounded-[12px] bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-700">
+            Dev mode — use code: <span className="font-black tracking-widest">{devOtp}</span>
+          </p>
+        )}
+
+        <button
+          type="submit"
           disabled={isVerifying || otp.join("").length < 6}
           className="mt-[20px] flex h-[60px] w-full items-center justify-center rounded-[16px] bg-[#111827] text-[16px] font-bold text-white transition-all hover:bg-black disabled:opacity-50 disabled:hover:bg-[#111827]"
         >
           {isVerifying ? (
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              className="h-[24px] w-[24px] rounded-full border-[3px] border-white border-t-transparent"
-            />
+            <Loader2 size={24} className="animate-spin" />
           ) : (
             "Verify Account"
           )}
@@ -321,8 +436,8 @@ const OTPForm = ({ onBack }) => {
 
       <p className="mt-[32px] text-center text-[15px] font-medium text-[#667085]">
         Didn't receive code?{" "}
-        <button className="font-bold text-[#5148e9] hover:underline">
-          Resend
+        <button onClick={resend} disabled={resending} className="font-bold text-[#5148e9] hover:underline disabled:opacity-50">
+          {resending ? "Sending..." : "Resend"}
         </button>
       </p>
     </motion.div>

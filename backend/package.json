@@ -1,0 +1,35 @@
+{
+  "name": "mdesign-backend",
+  "version": "1.0.0",
+  "description": "MDesign backend - AI design generation pipeline (planning, image-gen, design-gen, customization, export)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "worker": "node --watch src/jobs/worker.js",
+    "lint": "oxlint src"
+  },
+  "dependencies": {
+    "@heyputer/puter.js": "^2.6.1",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "axios": "^1.7.9",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.6.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "ioredis": "^5.4.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.5",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "sharp": "^0.35.3",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "oxlint": "^0.15.0"
+  }
+}

@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import {
   ArrowUpRight,
   Sparkles,
-  ArrowRight,
 } from "lucide-react";
 
 const TwitterIcon = () => (

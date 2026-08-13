@@ -1,0 +1,2 @@
+[ERROR] 2026-08-12T14:15:41.247Z worker:1 planning failed: No API key configured for "text" provider
+[ERROR] 2026-08-12T14:15:41.251Z worker loop planning:1 error: No API key configured for "text" provider

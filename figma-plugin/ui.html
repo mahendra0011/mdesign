@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Inter, -apple-system, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f7f7fb;
+      color: #111827;
+      font-size: 13px;
+    }
+    h1 { font-size: 15px; font-weight: 800; margin: 0 0 4px; }
+    p.hint { color: #667085; font-size: 12px; margin: 0 0 12px; line-height: 1.5; }
+    label { display: block; font-weight: 600; font-size: 12px; margin: 12px 0 4px; color: #374151; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+    }
+    input:focus, textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12); }
+    textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; }
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 14px;
+      background: #6366f1;
+      color: #fff;
+    }
+    button:hover { background: #4f46e5; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12px; display: none; }
+    .status.ok { display: block; background: #ecfdf5; color: #047857; }
+    .status.err { display: block; background: #fef2f2; color: #b91c1c; }
+    details { margin-top: 14px; font-size: 11px; color: #98a2b3; }
+  </style>
+</head>
+<body>
+  <h1>MDesign Import</h1>
+  <p class="hint">
+    Paste the export payload JSON from MDesign (Export → Figma file → “Copy payload JSON”),
+    or fetch it directly from your backend by URL.
+  </p>
+
+  <label for="payloadUrl">Payload URL (optional)</label>
+  <input id="payloadUrl" type="text" placeholder="http://localhost:5000/api/exports/&lt;jobId&gt;/figma-payload" />
+
+  <label for="token">Access token (only if the API requires auth)</label>
+  <input id="token" type="password" placeholder="JWT access token (optional)" />
+
+  <button id="btnUrl">Fetch from URL</button>
+
+  <label for="payloadJson">…or paste the payload JSON directly</label>
+  <textarea id="payloadJson" rows="12" placeholder='{"schemaVersion":1,"name":"MDesign export",...}'></textarea>
+
+  <button id="btnJson">Create design from JSON</button>
+
+  <div id="status" class="status"></div>
+
+  <details>
+    <summary>How to get the payload</summary>
+    <p>
+      1. In MDesign Studio, run Export → “Figma file”.<br />
+      2. Wait for it to finish, then click “Copy payload JSON”.<br />
+      3. Paste it here (or use the URL above) and click Create.
+    </p>
+  </details>
+
+  <script>
+    const urlInput = document.getElementById('payloadUrl');
+    const tokenInput = document.getElementById('token');
+    const jsonInput = document.getElementById('payloadJson');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(message, isError) {
+      statusEl.textContent = message;
+      statusEl.className = 'status ' + (isError ? 'err' : 'ok');
+    }
+
+    document.getElementById('btnUrl').addEventListener('click', async () => {
+      const url = urlInput.value.trim();
+      if (!url) return setStatus('Enter a payload URL first', true);
+      setStatus('Fetching payload…');
+      parent.postMessage({ pluginMessage: { type: 'create-url', url, token: tokenInput.value.trim() } }, '*');
+    });
+
+    document.getElementById('btnJson').addEventListener('click', () => {
+      const payload = jsonInput.value.trim();
+      if (!payload) return setStatus('Paste the payload JSON first', true);
+      parent.postMessage({ pluginMessage: { type: 'create-json', payload } }, '*');
+    });
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'done') setStatus(msg.message);
+      else if (msg.type === 'error') setStatus(msg.message, true);
+    };
+  </script>
+</body>
+</html>

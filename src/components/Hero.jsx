@@ -1,7 +1,6 @@
-import React, { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Command, Activity, Share2, Edit2, Plus, ArrowUpRight, Gauge, MousePointer2, Play } from 'lucide-react';
-import { motion, useAnimation } from "framer-motion";
+import { motion } from "framer-motion";
 
 const Hero = () => {
   return (

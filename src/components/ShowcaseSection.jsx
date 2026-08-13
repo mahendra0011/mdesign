@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { 
   Sparkles, Zap, Layers, Cloud, LayoutGrid, Droplet, Circle, 
-  ChevronDown, Mic, Menu, ArrowRight, Users
+  ChevronDown, Menu, ArrowRight, Users
 } from 'lucide-react';
 
 const ShowcaseSection = () => {
