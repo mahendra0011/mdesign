@@ -31,11 +31,19 @@ async function chatOpenAICompatible(config, system, userPrompt) {
       temperature: 0.4,
       response_format: { type: 'json_object' },
     },
-    { headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' } }
+    { headers: openaiCompatHeaders(config) }
   );
   const content = response.data?.choices?.[0]?.message?.content;
   if (!content) throw new ApiError(502, 'Empty LLM response');
   return content;
+}
+
+function openaiCompatHeaders(config) {
+  return {
+    Authorization: `Bearer ${config.apiKey}`,
+    'Content-Type': 'application/json',
+    ...(config.baseUrl.includes('openrouter.ai') ? { 'HTTP-Referer': env.clientUrl, 'X-Title': 'MDesign' } : {}),
+  };
 }
 
 async function chatGemini(config, system, userPrompt) {
@@ -146,7 +154,7 @@ const imageAdapters = {
           response_format: 'b64_json',
         },
         {
-          headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
+          headers: openaiCompatHeaders(config),
           timeout: 120000,
         }
       );
@@ -288,7 +296,7 @@ async function visionOpenAICompatible(config, prompt, imageUrl) {
       response_format: { type: 'json_object' },
       max_tokens: 4000,
     },
-    { headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' } }
+    { headers: openaiCompatHeaders(config) }
   );
   const contentOut = response.data?.choices?.[0]?.message?.content;
   if (!contentOut) throw new ApiError(502, 'Empty vision response');
