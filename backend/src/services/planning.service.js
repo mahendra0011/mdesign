@@ -274,16 +274,18 @@ export function templatePlan(prompt, platform) {
   };
 }
 
-export async function processPlanJob({ projectId }) {
+export async function processPlanJob({ projectId, instruction }) {
   const project = await Project.findById(projectId);
   if (!project) throw new Error('Project not found');
 
-  await Project.findByIdAndUpdate(projectId, { status: 'planning' });
+  await Project.findByIdAndUpdate(projectId, { status: 'planning', planStatus: 'awaiting_approval' });
   await publishSocketEvent(projectId, 'pipeline_status', { status: 'planning' });
 
   const modelOverride = await resolveModelOverride(project.user, 'text', project._id);
   const vocabulary = PLATFORM_VOCABULARY[project.platform] || PLATFORM_VOCABULARY.web;
-  const userPrompt = `Platform: ${project.platform}\n${vocabulary}\nProduct description:\n${project.prompt}\n\nProduce the structured plan JSON.`;
+  const userPrompt = `Platform: ${project.platform}\n${vocabulary}\nProduct description:\n${project.prompt}\n\nProduce the structured plan JSON.${
+    instruction ? `\n\nThe user reviewed a previous plan and requested these changes — incorporate ALL of them:\n${instruction}` : ''
+  }`;
 
   let plan = null;
   let errors = [];
@@ -300,6 +302,7 @@ ${errors.join('\n')}`;
         modelOverride,
         system,
         user: userPrompt,
+        projectId,
       });
       plan = extractJson(content);
       errors = validatePlan(plan);
@@ -322,7 +325,7 @@ ${errors.join('\n')}`;
 
   await Project.findByIdAndUpdate(projectId, { plan });
   await publishSocketEvent(projectId, 'plan_ready', { plan });
-  await startImagePhase(projectId, plan);
+  logger.info(`plan ready for project ${projectId} — awaiting user approval`);
 }
 
 export function extractImageRequirements(plan) {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, RefreshCw, ImagePlus, Sparkles } from 'lucide-react';
+import { ArrowLeft, RefreshCw, ImagePlus, Sparkles, Heart } from 'lucide-react';
 import { api, errorMsg } from '../lib/api.js';
 import { connectSocket, joinProject } from '../lib/socket.js';
+import { attachPuterBridge } from '../lib/puterBridge.js';
 import DesignCanvas from '../components/studio/DesignCanvas.jsx';
 import CustomizePanel from '../components/studio/CustomizePanel.jsx';
 import ExportPanel from '../components/studio/ExportPanel.jsx';
@@ -101,6 +102,9 @@ export default function StudioPage() {
   const [buildingId, setBuildingId] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [notice, setNotice] = useState('');
+  const [favourite, setFavourite] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+  const [changeInput, setChangeInput] = useState('');
   const imageMap = useRef(new Map());
 
   const token = localStorage.getItem('mdesign_token');
@@ -110,6 +114,7 @@ export default function StudioPage() {
       const { data } = await api.get(`/projects/${id}`);
       setProject(data.project);
       setStatus(data.project.status);
+      setFavourite(!!data.project.favourite);
       imageMap.current = new Map(data.images.map((img) => [img.index, img]));
       setImages(data.images);
       if (data.latestVersion) {
@@ -121,6 +126,31 @@ export default function StudioPage() {
     }
   }, [id]);
 
+  const approvePlan = async () => {
+    try {
+      await api.post(`/projects/${id}/plan/approve`);
+      setStatus('images_generating');
+      setStreaming(true);
+      setChangeOpen(false);
+    } catch (err) {
+      setError(errorMsg(err));
+    }
+  };
+
+  const submitReplan = async () => {
+    const instruction = changeInput.trim();
+    if (!instruction) return;
+    try {
+      await api.post(`/projects/${id}/plan/replan`, { instruction });
+      setChangeInput('');
+      setChangeOpen(false);
+      setStatus('planning');
+      setStreaming(true);
+    } catch (err) {
+      setError(errorMsg(err));
+    }
+  };
+
   useEffect(() => {
     load();
   }, [load]);
@@ -129,12 +159,13 @@ export default function StudioPage() {
     if (!token) return;
     const socket = connectSocket(token);
     socket.on('connect', () => joinProject(socket, id));
+    attachPuterBridge(socket);
 
     socket.on('pipeline_status', ({ status: s }) => {
       setStatus(s);
       setStreaming(s === 'planning' || s === 'images_generating' || s === 'designing');
     });
-    socket.on('plan_ready', () => {});
+    socket.on('plan_ready', () => load());
     socket.on('image_status', ({ index, total, status: s, url, sectionId }) => {
       setNotice(`Mockup ${index + 1}/${total} ${s === 'failed' ? 'failed — will use placeholder' : 'done'}`);
       imageMap.current.set(index, { index, status: s, url, sectionId });
@@ -142,8 +173,11 @@ export default function StudioPage() {
       setImages([...sorted]);
       if (s === 'failed' && index === total - 1) setTimeout(() => setNotice(''), 4000);
     });
-    socket.on('section_start', ({ section_id }) => setNotice(`Building section ${section_id}`));
-    socket.on('cursor_move', ({ x_pct, y_pct }) => setCursor({ x_pct, y_pct }));
+    socket.on('section_start', ({ section_id }) => {
+      setNotice(`Building section ${section_id}`);
+      document.getElementById(`section-${section_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    socket.on('cursor_move', ({ x_pct, y_pct, clicking, component_id }) => setCursor({ x_pct, y_pct, clicking, component_id }));
     socket.on('component_build_start', ({ component_id }) => {
       setBuildingId(component_id);
       setBuiltIds((prev) => (prev ? prev : new Set()));
@@ -208,11 +242,20 @@ export default function StudioPage() {
     }
   };
 
-  const replay = async () => {
+  const replay = async (pace = 'normal') => {
     setBuiltIds(new Set());
     try {
-      await api.post(`/projects/${id}/replay`);
+      await api.post(`/projects/${id}/replay`, { pace });
       setStreaming(true);
+    } catch (err) {
+      setNotice(errorMsg(err));
+    }
+  };
+
+  const toggleFavourite = async () => {
+    try {
+      const { data } = await api.patch(`/projects/${id}/favourite`);
+      setFavourite(data.favourite);
     } catch (err) {
       setNotice(errorMsg(err));
     }
@@ -242,15 +285,41 @@ export default function StudioPage() {
             <span className="max-w-md truncate text-sm font-semibold text-[#111827]">{project.prompt}</span>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={toggleFavourite}
+              title={favourite ? 'Remove from favourites' : 'Add to favourites'}
+              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                favourite ? 'border-rose-200 bg-rose-50 text-rose-500' : 'border-gray-200 bg-white text-gray-400 hover:text-rose-500'
+              }`}
+            >
+              <Heart size={15} fill={favourite ? 'currentColor' : 'none'} />
+            </button>
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
               ready ? 'bg-emerald-50 text-emerald-700' : status === 'failed' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
             }`}>
               {status.replace('_', ' ')}
             </span>
             {ready && (
-              <button onClick={replay} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] hover:border-indigo-200">
-                <RefreshCw size={13} /> Replay build
-              </button>
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center rounded-lg border border-gray-200 bg-white p-0.5">
+                  {[
+                    { id: 'fast', label: 'Fast' },
+                    { id: 'normal', label: 'Normal' },
+                    { id: 'cinematic', label: 'Cinematic' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => replay(p.id)}
+                      className="rounded-md px-2 py-1 text-[11px] font-semibold text-[#667085] hover:bg-gray-50 hover:text-[#111827] transition-colors"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => replay('normal')} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] hover:border-indigo-200">
+                  <RefreshCw size={13} /> Replay build
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -278,6 +347,45 @@ export default function StudioPage() {
                 </div>
               ))}
             </div>
+
+            {project?.planStatus === 'awaiting_approval' && project?.plan && (
+              <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-[#111827]">Plan ready — approve to start building</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {project.plan.sections.map((s) => (
+                        <span key={s.id} className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700 ring-1 ring-indigo-100">
+                          {s.title}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button onClick={approvePlan} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                      Build it
+                    </button>
+                    <button onClick={() => setChangeOpen(!changeOpen)} className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#667085] hover:text-[#111827]">
+                      Change
+                    </button>
+                  </div>
+                </div>
+                {changeOpen && (
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={changeInput}
+                      onChange={(e) => setChangeInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && submitReplan()}
+                      placeholder="Tell me what to change..."
+                      className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-indigo-300"
+                    />
+                    <button onClick={submitReplan} className="rounded-lg bg-black px-3 py-2 text-xs font-semibold text-white">
+                      Send
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
               {imagesOrdered.map((img) => (

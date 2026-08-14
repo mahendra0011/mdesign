@@ -4,6 +4,7 @@ import { ArrowLeft, Upload, Sparkles, PenTool } from 'lucide-react';
 import { useAuth } from '../context/useAuth.js';
 import { api, errorMsg } from '../lib/api.js';
 import { connectSocket, joinUser } from '../lib/socket.js';
+import { attachPuterBridge } from '../lib/puterBridge.js';
 
 const STATUS_STYLES = {
   uploaded: 'bg-sky-50 text-sky-700',
@@ -51,6 +52,7 @@ export default function UploadPage() {
     };
     if (socket.connected) join();
     else socket.on('connect', join);
+    attachPuterBridge(socket);
 
     socket.on('upload:analysis_started', ({ uploadedDesignId }) => {
       applyStatus(uploadedDesignId, 'analyzing');

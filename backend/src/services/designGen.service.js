@@ -136,6 +136,7 @@ export async function processDesignJob({ projectId }) {
         imageUrl: image?.url || null,
         section,
         plan: project.plan,
+        projectId,
       });
       tree = result.tree;
     } catch (err) {
@@ -167,6 +168,7 @@ export async function processDesignJob({ projectId }) {
         sectionTrees: trees,
         images: doneImages.map((img) => ({ section_id: img.sectionId, url: img.url })),
       }),
+      projectId,
     });
     designJson = normalizeDesignJson(extractJson(content), project.plan);
   } catch (err) {

@@ -13,8 +13,8 @@ async function main() {
   await seedModelCatalog();
   await redis.ping();
 
-  registerWorkers();
   if (env.runWorkersInProcess) startInProcessWorkers();
+  else registerWorkers();
 
   const app = createApp();
   const server = http.createServer(app);

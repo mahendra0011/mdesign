@@ -1,7 +1,26 @@
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function defaultPosition(i) {
   return { x_pct: (i % 2) * 50 + 25, y_pct: Math.min(85, 28 + i * 9) };
+}
+
+function useTyping(text, active, speed = 18) {
+  const [chars, setChars] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setChars(0);
+      return undefined;
+    }
+    let i = 0;
+    const id = setInterval(() => {
+      i += 1;
+      setChars(i);
+      if (i >= String(text || '').length) clearInterval(id);
+    }, speed);
+    return () => clearInterval(id);
+  }, [active, text, speed]);
+  return active ? String(text || '').slice(0, chars) : text;
 }
 
 function Block({ component, index, visible, building }) {
@@ -9,21 +28,30 @@ function Block({ component, index, visible, building }) {
   const w = pos.w_pct ?? 70;
   const h = pos.h_pct ?? 12;
   const style = { ...(component.style || {}) };
+  const isTextType = component.type === 'text' || component.type === 'heading' || component.type === 'paragraph' || component.type === 'span';
+  const typed = useTyping(component.props?.text || '', building && isTextType);
 
   let node;
   switch (component.type) {
     case 'image':
       node = component.props?.src ? (
-        <img src={component.props.src} alt={component.props.alt || ''} className="h-full w-full rounded object-cover" style={{ objectPosition: 'center' }} />
+        <img
+          src={component.props.src}
+          alt={component.props.alt || ''}
+          className={`h-full w-full rounded object-cover transition-[filter] duration-1000 ${building ? 'blur-md scale-105' : 'blur-0 scale-100'}`}
+          style={{ objectPosition: 'center' }}
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center rounded bg-gray-100 text-xs text-gray-400">image</div>
       );
       break;
     case 'button':
       node = (
-        <span className="inline-flex items-center justify-center rounded px-6 py-2.5 text-sm font-semibold text-white shadow-sm"
-          style={{ background: 'var(--m-primary, #4338ca)', borderRadius: style.borderRadius || '10px' }}>
-          {component.props?.text || 'Button'}
+        <span
+          className={`inline-flex items-center justify-center rounded px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform duration-300 ${building ? 'scale-90' : 'scale-100'}`}
+          style={{ background: 'var(--m-primary, #4338ca)', borderRadius: style.borderRadius || '10px' }}
+        >
+          {typed || component.props?.text || 'Button'}
         </span>
       );
       break;
@@ -72,7 +100,7 @@ function Block({ component, index, visible, building }) {
     default:
       node = (
         <span style={style} className="block text-gray-800">
-          {component.props?.text || ''}
+          {typed || component.props?.text || ''}
         </span>
       );
   }
@@ -151,7 +179,7 @@ export default function DesignCanvas({ tree, builtIds = null, cursor = null, bui
     <div className="space-y-4 rounded-2xl border border-gray-200/60 bg-white p-2 shadow-sm ring-1 ring-black/[0.02]">
       <div className="relative overflow-hidden rounded-xl bg-gray-50" style={cssVars}>
         {(tree.sections || []).map((section) => (
-          <div key={section.id} className="relative mb-4 aspect-[16/9] w-full overflow-hidden border border-gray-100 shadow-sm"
+          <div key={section.id} id={`section-${section.id}`} className="relative mb-4 aspect-[16/9] w-full overflow-hidden border border-gray-100 shadow-sm"
             style={{ background: 'var(--m-bg, #fff)' }}>
             <div className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/40 px-2.5 py-1 text-[10px] font-semibold tracking-wide text-white shadow-sm backdrop-blur-md">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
@@ -189,6 +217,19 @@ export default function DesignCanvas({ tree, builtIds = null, cursor = null, bui
               className="pointer-events-none absolute z-50 flex items-start gap-1"
               style={{ originX: 0, originY: 0 }}
             >
+              <AnimatePresence>
+                {cursor.clicking && (
+                  <motion.div
+                    key={cursor.component_id || 'click'}
+                    initial={{ scale: 0, opacity: 0.7 }}
+                    animate={{ scale: 2.5, opacity: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                    className="absolute rounded-full bg-indigo-400/70"
+                    style={{ width: 20, height: 20, left: 2, top: 2 }}
+                  />
+                )}
+              </AnimatePresence>
               {/* Premium Cursor SVG matching UX Pilot style */}
               <svg width="28" height="32" viewBox="0 0 24 36" fill="none" xmlns="http://www.w3.org/2000/svg" className="drop-shadow-[0_2px_8px_rgba(79,70,229,0.4)]">
                 <path d="M5.65376 12.3673H5.46026L5.31717 12.4976L0.500002 16.8829L0.500002 1.19841L11.7871 12.3673H5.65376Z" fill="#4F46E5" stroke="white" strokeWidth="2" strokeLinejoin="round"/>

@@ -26,10 +26,40 @@ export function componentPosition(component, sectionIndex, componentIndex) {
   };
 }
 
-export async function streamDesignBuild(projectId, designJson, designVersionId) {
-  const preset = PACES[env.buildPace] || PACES.normal;
-  logger.info(`streaming design build for project ${projectId} (pace: ${env.buildPace})`);
+function arcWaypoint(from, to) {
+  const midX = (from.x_pct + to.x_pct) / 2 + (Math.random() * 8 - 4);
+  const midY = Math.min(from.y_pct, to.y_pct) - 5;
+  return { x_pct: Math.max(2, Math.min(98, midX)), y_pct: Math.max(2, Math.min(98, midY)) };
+}
 
+async function glideTo(projectId, from, to, componentId, clicking) {
+  const dx = Math.abs((to.x_pct || 0) - (from?.x_pct || 0));
+  const dy = Math.abs((to.y_pct || 0) - (from?.y_pct || 0));
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  if (distance > 34 && from) {
+    const waypoint = arcWaypoint(from, to);
+    await publishSocketEvent(projectId, 'cursor_move', {
+      component_id: componentId,
+      x_pct: waypoint.x_pct,
+      y_pct: waypoint.y_pct,
+      waypoint: true,
+    });
+    await sleep(70);
+  }
+  await publishSocketEvent(projectId, 'cursor_move', {
+    component_id: componentId,
+    x_pct: to.x_pct,
+    y_pct: to.y_pct,
+    clicking,
+  });
+}
+
+export async function streamDesignBuild(projectId, designJson, designVersionId, paceOverride) {
+  const preset = PACES[paceOverride] || PACES[env.buildPace] || PACES.normal;
+  const paceName = paceOverride || env.buildPace;
+  logger.info(`streaming design build for project ${projectId} (pace: ${paceName})`);
+
+  let cursor = null;
   for (let s = 0; s < (designJson.sections || []).length; s += 1) {
     const section = designJson.sections[s];
     await publishSocketEvent(projectId, 'section_start', { section_id: section.id });
@@ -42,16 +72,15 @@ export async function streamDesignBuild(projectId, designJson, designVersionId) 
     for (let i = 0; i < ordered.length; i += 1) {
       const component = ordered[i];
       const position = componentPosition(component, s, i);
-      await publishSocketEvent(projectId, 'cursor_move', {
-        component_id: component.id,
-        x_pct: position.x_pct,
-        y_pct: position.y_pct,
-      });
+      const clicking = ['button', 'input', 'link'].includes(component.type);
+      await glideTo(projectId, cursor, position, component.id, clicking);
+      cursor = position;
       await sleep(preset.step * 0.6);
 
       await publishSocketEvent(projectId, 'component_build_start', {
         component_id: component.id,
         type: component.type,
+        props: component.props || {},
       });
       await sleep(Math.round(preset.step * paceFor(component)));
 

@@ -184,6 +184,7 @@ export async function aiCustomizeProject(projectId, userId, instruction) {
       modelOverride: await resolveModelOverride(userId, 'text', projectId),
       system: AI_CUSTOMIZE_PROMPT,
       user: JSON.stringify({ instruction, design_json: latest.designJson }),
+      projectId,
     });
     ops = extractJson(content).operations;
   } catch (err) {

@@ -22,9 +22,9 @@ const ELEMENT_DETECTION_PROMPT = `Detect all distinct UI elements (text, image, 
 Return ONLY JSON matching: {"elements":[{"type":"text|image|icon|button|logo|shape","bbox":{"x":number,"y":number,"width":number,"height":number}}]}
 bbox values are percentages (0-100) of the image. Max 20 elements. No markdown, no explanation.`;
 
-export async function detectElements(imageUrl) {
+export async function detectElements(imageUrl, userId) {
   try {
-    const { content } = await analyzeImage({ imageUrl, prompt: ELEMENT_DETECTION_PROMPT });
+    const { content } = await analyzeImage({ imageUrl, prompt: ELEMENT_DETECTION_PROMPT, userId });
     const parsed = extractJson(content);
     return (parsed?.elements || []).slice(0, 20).map((el, i) => ({
       elementId: `el_${i + 1}_${Date.now()}`,
@@ -139,6 +139,7 @@ export async function runElementGeneration(session, { prompt, elementType }) {
   const { imageUrl } = await generateImage({
     prompt: buildGenerateElementPrompt(prompt, elementType),
     aspectRatio: '1:1',
+    userId: session.user,
   });
   const result = await cloudinary.uploader.upload(imageUrl, { folder: 'mdesign/elements' });
   const element = {

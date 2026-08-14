@@ -7,6 +7,7 @@ import {
   sanitizeMockupPrompt,
 } from './mockupPrompt.service.js';
 import { postprocessImage } from './postprocess.service.js';
+import { uploadToCloudinary } from './upload.service.js';
 import { publishSocketEvent, publishImageEvent } from '../config/redis.js';
 import { enqueue } from './queue.service.js';
 import { env } from '../config/env.js';
@@ -14,17 +15,22 @@ import { extractImageRequirements } from './planning.service.js';
 import { logger } from '../utils/logger.js';
 
 const POLICY_HINT = /policy|safety|inappropriate|harmful|blocked|moderation/i;
-
 async function bumpProgress(projectId, { done = 0, failed = 0 }) {
   const project = await Project.findByIdAndUpdate(
     projectId,
     { $inc: { 'progress.doneImages': done, 'progress.failedImages': failed } },
     { new: true }
   );
-  if (project && project.progress.doneImages >= project.progress.totalImages) {
+  if (project && project.progress.doneImages + project.progress.failedImages >= project.progress.totalImages) {
+    const failedCount = project.progress.failedImages;
     logger.info(
-      `all ${project.progress.totalImages} section mockups processed for project ${projectId} — triggering design-gen`
+      `all ${project.progress.totalImages} section mockups processed for project ${projectId}${failedCount ? ` (${failedCount} failed)` : ''} — triggering design-gen`
     );
+    if (failedCount) {
+      await publishSocketEvent(projectId, 'pipeline_notice', {
+        message: `${failedCount} mockup${failedCount > 1 ? 's' : ''} failed — using placeholder`,
+      });
+    }
     await enqueue('design-gen', { projectId });
   }
 }
@@ -87,13 +93,14 @@ export async function processImageJob({ projectId, requirement, index, total, mo
         prompt: mockupPrompt,
         negativePrompt: buildNegativePrompt(),
         aspectRatio: requirement.aspect_ratio || '16:9',
+        projectId,
       });
     } catch (err) {
       if (retryCount === 0 && POLICY_HINT.test(err.message || '')) {
         logger.warn(
           `content-policy rejection on mockup ${index + 1} — running prompt sanitizer and retrying once`
         );
-        const sanitized = await sanitizeMockupPrompt(mockupPrompt);
+        const sanitized = await sanitizeMockupPrompt(mockupPrompt, projectId);
         if (sanitized) {
           mockupPrompt = sanitized;
           generated = await generateImage({
@@ -101,6 +108,7 @@ export async function processImageJob({ projectId, requirement, index, total, mo
             prompt: mockupPrompt,
             negativePrompt: buildNegativePrompt(),
             aspectRatio: requirement.aspect_ratio || '16:9',
+            projectId,
           });
         } else {
           throw err;
@@ -110,7 +118,14 @@ export async function processImageJob({ projectId, requirement, index, total, mo
       }
     }
 
-    const processed = await postprocessImage(generated.url, requirement.aspect_ratio || '16:9');
+    let url = generated.url;
+    if (url && url.startsWith('data:')) {
+      const base64 = url.split(',')[1] || '';
+      const uploaded = await uploadToCloudinary(Buffer.from(base64, 'base64'), { folder: 'mdesign/mockups' });
+      url = uploaded.secure_url;
+    }
+
+    const processed = await postprocessImage(url, requirement.aspect_ratio || '16:9');
 
     await GeneratedImage.findByIdAndUpdate(imageDoc._id, {
       status: 'done',

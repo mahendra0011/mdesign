@@ -8,15 +8,26 @@ const DEFAULT_PREFS = { textModel: 'default', imageModel: 'default', designModel
 
 export async function listModels(req, res) {
   const { category } = req.query;
-  const filter = { isActive: true };
+  const filter = {
+    isActive: true,
+    // only free OpenRouter models — paid OpenRouter models are excluded from the project
+    $or: [{ provider: { $ne: 'openrouter' } }, { badge: 'free' }],
+  };
   if (category) {
     if (!CATEGORIES.includes(category)) throw badRequest(`category must be one of ${CATEGORIES.join('|')}`);
     filter.category = category;
   }
   const models = await ModelCatalog.find(filter)
     .select('modelId name provider category capabilities costPerUnit costInput costOutput avgLatencyMs badge source isActive')
-    .sort({ category: 1, costPerUnit: 1 });
-  res.json({ success: true, models });
+    .sort({ category: 1, source: 1, costPerUnit: 1 });
+  // deduplicate by modelId — prefer native over puter when both exist
+  const seen = new Set();
+  const deduped = models.filter((m) => {
+    if (seen.has(m.modelId)) return false;
+    seen.add(m.modelId);
+    return true;
+  });
+  res.json({ success: true, models: deduped });
 }
 
 export async function syncModels(req, res) {
@@ -39,7 +50,7 @@ export async function updateModelPreferences(req, res) {
 
   const provided = [textModel, imageModel, designModel].filter((m) => m && m !== 'default');
   if (provided.length) {
-    const valid = await ModelCatalog.find({ modelId: { $in: provided } }).select('modelId');
+    const valid = await ModelCatalog.find({ modelId: { $in: provided }, isActive: true }).select('modelId');
     const validIds = new Set(valid.map((m) => m.modelId));
     for (const modelId of provided) {
       if (!validIds.has(modelId)) throw badRequest(`unknown model "${modelId}"`);

@@ -4,12 +4,12 @@ import { DesignVersion } from '../models/DesignVersion.js';
 import { ModelPreference } from '../models/ModelPreference.js';
 import { ModelCatalog } from '../models/ModelCatalog.js';
 import { startPipeline, getProjectForUser } from '../services/orchestrator.service.js';
-import { extractImageRequirements } from '../services/planning.service.js';
+import { extractImageRequirements, startImagePhase } from '../services/planning.service.js';
 import { streamDesignBuild } from '../services/animation.service.js';
 import { revertVersion as revertVersionService } from '../services/customization.service.js';
 import { publishSocketEvent } from '../config/redis.js';
 import { enqueue } from '../services/queue.service.js';
-import { badRequest } from '../utils/apiError.js';
+import { badRequest, ApiError } from '../utils/apiError.js';
 
 const OVERRIDE_KEYS = ['textModel', 'imageModel', 'designModel'];
 
@@ -21,11 +21,24 @@ export async function createProject(req, res) {
 }
 
 export async function listProjects(req, res) {
-  const projects = await Project.find({ user: req.user._id })
+  const { favourite } = req.query || {};
+  const filter = { user: req.user._id };
+  if (favourite === 'true') filter.favourite = true;
+  const projects = await Project.find(filter)
     .sort({ createdAt: -1 })
     .limit(50)
     .select('-plan');
   res.json({ success: true, projects });
+}
+
+export async function toggleFavourite(req, res) {
+  const project = await Project.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    [{ $set: { favourite: { $not: '$favourite' } } }],
+    { new: true }
+  );
+  if (!project) throw new ApiError(404, 'Project not found');
+  res.json({ success: true, favourite: project.favourite });
 }
 
 export async function getProject(req, res) {
@@ -98,12 +111,37 @@ export async function replayDesign(req, res) {
   const latest = await DesignVersion.findOne({ project: project._id }).sort({ versionNo: -1 });
   if (!latest) throw badRequest('No design version to replay');
 
-  await streamDesignBuild(project._id, latest.designJson, latest.versionNo);
+  const { pace } = req.body || {};
+  const allowedPace = ['fast', 'normal', 'cinematic'].includes(pace) ? pace : null;
+  await streamDesignBuild(project._id, latest.designJson, latest.versionNo, allowedPace);
   await publishSocketEvent(project._id, 'design_ready', {
     versionNo: latest.versionNo,
     designJson: latest.designJson,
   });
   res.json({ success: true, message: `design replay finished (version ${latest.versionNo})` });
+}
+
+export async function approvePlan(req, res) {
+  const project = await getProjectForUser(req.params.id, req.user._id);
+  if (!project.plan) throw badRequest('No plan to approve yet');
+  if (project.planStatus !== 'awaiting_approval') throw badRequest('Plan is not awaiting approval');
+
+  await Project.findByIdAndUpdate(project._id, { planStatus: 'approved' });
+  await startImagePhase(project._id, project.plan);
+  res.json({ success: true, message: 'Plan approved — starting mockup generation' });
+}
+
+export async function replan(req, res) {
+  const { instruction } = req.body || {};
+  if (typeof instruction !== 'string' || !instruction.trim()) throw badRequest('instruction is required');
+  if (instruction.length > 2000) throw badRequest('instruction too long (max 2000 chars)');
+
+  const project = await getProjectForUser(req.params.id, req.user._id);
+  if (!project.plan) throw badRequest('No plan to revise yet');
+
+  await Project.findByIdAndUpdate(project._id, { planStatus: 'awaiting_approval' });
+  await enqueue('planning', { projectId: project._id, instruction: instruction.trim() });
+  res.json({ success: true, message: 'Revising plan with your changes' });
 }
 
 export async function getModelPreferences(req, res) {

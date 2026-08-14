@@ -6,6 +6,7 @@ import StudioPage from './pages/StudioPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import UploadPage from './pages/UploadPage.jsx';
 import CustomisePage from './pages/CustomisePage.jsx';
+import FavouritesPage from './pages/FavouritesPage.jsx';
 import { useAuth } from './context/useAuth.js';
 
 function Loading() {
@@ -33,6 +34,7 @@ function App() {
       <Route path="/design" element={<PromptWorkspace />} />
       <Route path="/design/uploads" element={<UploadPage />} />
       <Route path="/design/projects/:id" element={<StudioPage />} />
+      <Route path="/design/favourites" element={<FavouritesPage />} />
       <Route path="/design/customise/:uploadId" element={<CustomisePage />} />
       <Route path="/design/settings" element={<SettingsPage />} />
       <Route path="*" element={<Navigate to="/design" replace />} />

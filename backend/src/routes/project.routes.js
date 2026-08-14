@@ -15,9 +15,12 @@ router.get('/:id', asyncHandler(project.getProject));
 router.get('/:id/models', asyncHandler(project.getProjectModelOverrides));
 router.put('/:id/models', asyncHandler(project.updateProjectModelOverrides));
 router.post('/:id/regenerate-image', asyncHandler(project.regenerateImage));
+router.patch('/:id/favourite', asyncHandler(project.toggleFavourite));
 router.post('/:id/replay', asyncHandler(project.replayDesign));
 router.get('/:id/versions', asyncHandler(project.listVersions));
 router.get('/:id/versions/:versionNo', asyncHandler(project.getVersion));
 router.post('/:id/revert', asyncHandler(project.revertVersion));
+router.post('/:id/plan/approve', asyncHandler(project.approvePlan));
+router.post('/:id/plan/replan', asyncHandler(project.replan));
 
 export default router;

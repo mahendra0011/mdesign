@@ -50,6 +50,7 @@ export async function processAnalysisJob({ uploadedDesignId }) {
     const { content } = await analyzeImage({
       imageUrl: design.originalFileUrl,
       prompt: ANALYSIS_PROMPT,
+      userId: design.user,
     });
     const analysisResult = normalizeAnalysis(extractJson(content));
     await UploadedDesign.findByIdAndUpdate(uploadedDesignId, { status: 'analyzed', analysisResult });

@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../context/useAuth.js';
 import { api, errorMsg } from '../lib/api.js';
 import { connectSocket, joinUser } from '../lib/socket.js';
+import { attachPuterBridge } from '../lib/puterBridge.js';
 
 const ELEMENT_TYPE_LABELS = { image: 'Image', logo: 'Logo', icon: 'Icon', shape: 'Shape' };
 
@@ -56,6 +57,7 @@ export default function CustomisePage() {
     };
     if (socket.connected) join();
     else socket.on('connect', join);
+    attachPuterBridge(socket);
 
     socket.on('customise:updated', ({ sessionId }) => {
       if (sessionId === session?._id) load();

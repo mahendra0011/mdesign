@@ -5,23 +5,11 @@ export const redis = new Redis(env.redisUrl, { maxRetriesPerRequest: null });
 
 export const redisSub = new Redis(env.redisUrl, { maxRetriesPerRequest: null });
 
-const DESIGN_CHANNEL = 'mdesign:design-events';
 const SOCKET_CHANNEL = 'mdesign:socket-events';
 const IMAGE_CHANNEL = 'mdesign:image-events';
 const USER_CHANNEL = 'mdesign:user-events';
 
-export const channels = { DESIGN_CHANNEL, SOCKET_CHANNEL, IMAGE_CHANNEL, USER_CHANNEL };
-
-export async function publishDesignEvent(projectId, event, data) {
-  await redis.publish(DESIGN_CHANNEL, JSON.stringify({ projectId, event, data }));
-}
-
-export async function subscribeDesignEvents(handler) {
-  await redisSub.subscribe(DESIGN_CHANNEL);
-  redisSub.on('message', (channel, message) => {
-    if (channel === DESIGN_CHANNEL) handler(JSON.parse(message));
-  });
-}
+export const channels = { SOCKET_CHANNEL, IMAGE_CHANNEL, USER_CHANNEL };
 
 export function publishSocketEvent(projectId, event, data) {
   return redis.publish(SOCKET_CHANNEL, JSON.stringify({ projectId, event, data }));

@@ -55,12 +55,13 @@ content safety policies while keeping the same section, layout, copy and design 
 Remove anything that could be flagged (explicit, violent, copyrighted, personal-data content).
 Replace unsafe subject matter with safe equivalents. Return ONLY a JSON object: {"prompt":"<rewritten prompt>"}`;
 
-export async function sanitizeMockupPrompt(prompt) {
+export async function sanitizeMockupPrompt(prompt, projectId) {
   const { chatText, extractJson } = await import('./modelRouter.service.js');
   const { content } = await chatText({
     kind: 'text',
     system: SANITIZER_SYSTEM,
     user: prompt,
+    projectId,
   });
   try {
     const parsed = extractJson(content);

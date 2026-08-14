@@ -113,7 +113,7 @@ function buildTree(parsed, sectionId) {
   };
 }
 
-export async function reconstructSection({ imageUrl, section, plan }) {
+export async function reconstructSection({ imageUrl, section, plan, projectId }) {
   const spec = JSON.stringify({
     section_id: section.id,
     section_name: section.name,
@@ -133,6 +133,7 @@ export async function reconstructSection({ imageUrl, section, plan }) {
       const { content } = await analyzeImage({
         imageUrl,
         prompt: `${imagePrompt()}\n\nSection spec:\n${spec}`,
+        projectId,
       });
       const parsed = extractJson(content);
       tree = buildTree(parsed, section.id);
@@ -152,6 +153,7 @@ export async function reconstructSection({ imageUrl, section, plan }) {
         font_direction: plan.font_direction,
         platform: plan.platform,
       })}\n\nSection spec:\n${spec}`,
+      projectId,
     });
     const parsed = extractJson(content);
     tree = buildTree(parsed, section.id);

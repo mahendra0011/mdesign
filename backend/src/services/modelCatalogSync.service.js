@@ -2,12 +2,9 @@ import axios from 'axios';
 import { ModelCatalog } from '../models/ModelCatalog.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { invalidatePuterCache } from './modelRouter.service.js';
 
-const FREE_COST_INPUT_CENTS = 50;
-const FREE_COST_OUTPUT_CENTS = 200;
-
-function classifyModel(id) {
-  const lower = String(id || '').toLowerCase();
+function classifyModel(id) {  const lower = String(id || '').toLowerCase();
   if (lower.includes('image') || lower.includes('img') || lower.includes('flux') || lower.includes('sdxl') || lower.includes('dall-e') || lower.includes('stable-diffusion')) {
     return 'image';
   }
@@ -30,13 +27,6 @@ function classifyModel(id) {
     return 'multimodal';
   }
   return 'text';
-}
-
-function badgeFromCost(cost) {
-  if (!cost) return 'free';
-  const input = Number.isFinite(cost.input) ? cost.input : 0;
-  const output = Number.isFinite(cost.output) ? cost.output : 0;
-  return input <= FREE_COST_INPUT_CENTS && output <= FREE_COST_OUTPUT_CENTS ? 'free' : 'quota';
 }
 
 function capabilityFor(modelId) {
@@ -71,32 +61,12 @@ async function upsertModel({ modelId, name, provider, category, badge, source, c
 }
 
 export async function syncPuterModels() {
-  if (!env.ai.puter.enabled || !env.ai.puter.authToken) {
-    logger.info('puter model sync skipped (disabled or no PUTER_AUTH_TOKEN)');
+  if (!env.ai.puter.enabled) {
+    logger.info('puter model sync skipped (disabled)');
     return { count: 0, skipped: true };
   }
-  const { init } = await import('@heyputer/puter.js/src/init.cjs');
-  const puter = init(env.ai.puter.authToken);
-  const models = await puter.ai.listModels();
-  if (!Array.isArray(models)) return { count: 0 };
-
-  let count = 0;
-  for (const m of models) {
-    const cost = m.cost || {};
-    await upsertModel({
-      modelId: m.id,
-      name: m.name || m.id,
-      provider: 'puter',
-      category: classifyModel(m.id),
-      badge: badgeFromCost(cost),
-      source: 'puter',
-      costInput: cost.input,
-      costOutput: cost.output,
-    });
-    count += 1;
-  }
-  logger.info(`puter model sync: ${count} models upserted`);
-  return { count };
+  logger.info('puter model sync skipped (browser-side provider — catalog is static)');
+  return { count: 0, skipped: true };
 }
 
 export async function syncOpenRouterModels() {
@@ -104,23 +74,39 @@ export async function syncOpenRouterModels() {
   const models = response.data?.data;
   if (!Array.isArray(models)) return { count: 0 };
 
+  const isFree = (m) => {
+    const id = String(m.id || '');
+    const freePricing = Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0;
+    return id.endsWith(':free') || freePricing;
+  };
+
+  const freeModels = models.filter(isFree);
+  const freeIds = freeModels.map((m) => m.id);
+
   let count = 0;
-  for (const m of models) {
+  for (const m of freeModels) {
     const modelId = m.id;
-    const badge = typeof modelId === 'string' && modelId.endsWith(':free') ? 'free' : 'quota';
     await upsertModel({
       modelId,
       name: m.name || modelId,
       provider: 'openrouter',
       category: classifyModel(modelId),
-      badge,
+      badge: 'free',
       source: 'openrouter',
       costInput: m.pricing?.prompt,
       costOutput: m.pricing?.completion,
     });
     count += 1;
   }
-  logger.info(`openrouter model sync: ${count} models upserted`);
+
+  // deactivate paid OpenRouter models — only free ones are kept in the project
+  const result = await ModelCatalog.updateMany(
+    { provider: 'openrouter', modelId: { $nin: freeIds } },
+    { $set: { isActive: false } }
+  );
+  logger.info(
+    `openrouter model sync: ${count} free models upserted, ${result.modifiedCount} paid models deactivated`
+  );
   return { count };
 }
 
@@ -135,5 +121,6 @@ export async function syncModelCatalogs() {
       results[fn.name] = { count: 0, error: err.message };
     }
   }
+  invalidatePuterCache();
   return results;
 }

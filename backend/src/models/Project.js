@@ -67,6 +67,11 @@ const projectSchema = new mongoose.Schema(
       index: true,
     },
     errorMessage: { type: String },
+    planStatus: {
+      type: String,
+      enum: ['none', 'awaiting_approval', 'approved'],
+      default: 'none',
+    },
     plan: { type: planSchema, default: null, minimize: false },
     progress: {
       totalImages: { type: Number, default: 0 },
@@ -74,6 +79,7 @@ const projectSchema = new mongoose.Schema(
       failedImages: { type: Number, default: 0 },
     },
     latestVersionNo: { type: Number, default: 0 },
+    favourite: { type: Boolean, default: false, index: true },
     modelOverrides: {
       textModel: { type: String, default: null },
       imageModel: { type: String, default: null },

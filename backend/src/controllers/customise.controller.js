@@ -56,7 +56,7 @@ export const createSession = asyncHandler(async (req, res) => {
     status: 'editing',
   });
 
-  const detected = await detectElements(design.originalFileUrl);
+  const detected = await detectElements(design.originalFileUrl, req.user._id);
   if (detected.length) {
     session.elements = detected;
     await session.save();

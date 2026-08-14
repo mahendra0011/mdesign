@@ -1,10 +1,74 @@
 import axios from 'axios';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/apiError.js';
+import { requestAiJob } from './aiJobBridge.service.js';
 
-function pickConfig(kind, modelOverride) {
+const GEMINI_MODELS = new Set([
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.7-flash',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+  'gemma-4-26b-a4b-it',
+  'gemma-4-31b-it',
+]);
+
+const GROQ_MODELS = new Set([
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'llama-3.2-90b-vision-preview',
+  'llama-3.2-3b-preview',
+  'llama-3.2-1b-preview',
+  'mistral-saba-24b',
+  'qwen-2.5-coder-32b',
+  'deepseek-r1-distill-llama-70b',
+  'qwen3-235b-a22b',
+  'moonshotai/kimi-k2-instruct',
+]);
+
+// Cache of Puter model IDs (queried from the catalog on first use, refreshed on sync)
+let puterModelCache = null;
+
+async function isPuterModel(modelId) {
+  if (!env.ai.puter.enabled || !modelId) return false;
+  if (puterModelCache) return puterModelCache.has(modelId);
+  const { ModelCatalog } = await import('../models/ModelCatalog.js');
+  const docs = await ModelCatalog.find({ provider: 'puter', isActive: true }).select('modelId -_id').lean();
+  puterModelCache = new Set(docs.map((d) => d.modelId));
+  return puterModelCache.has(modelId);
+}
+
+// Invalidate the Puter model cache (call after catalog sync)
+export function invalidatePuterCache() {
+  puterModelCache = null;
+}
+
+async function pickConfig(kind, modelOverride) {
   const base = kind === 'image' ? env.ai.image : kind === 'design' ? env.ai.design : kind === 'vision' ? env.ai.vision : env.ai.text;
-  return { ...base, model: modelOverride || base.model };
+  const model = modelOverride || base.model;
+
+  // Gemini free-tier models (Google AI Studio key)
+  if (GEMINI_MODELS.has(model) && env.ai.gemini.apiKey) {
+    const block = env.ai.gemini;
+    const blockModel = kind === 'vision' ? block.visionModel : kind === 'design' ? block.designModel : block.textModel;
+    return { provider: 'openai-compatible', baseUrl: block.baseUrl, apiKey: block.apiKey, model: blockModel };
+  }
+
+  // Groq free-tier models (Groq key)
+  if (GROQ_MODELS.has(model) && env.ai.groq.apiKey) {
+    const block = env.ai.groq;
+    const blockModel = kind === 'vision' ? block.visionModel : kind === 'design' ? block.designModel : block.textModel;
+    return { provider: 'openai-compatible', baseUrl: block.baseUrl, apiKey: block.apiKey, model: blockModel };
+  }
+
+  // Puter models (browser-side — user's own free quota via Puter bridge)
+  if (await isPuterModel(model)) {
+    return { provider: 'puter', model, enabled: env.ai.puter.enabled };
+  }
+
+  return { ...base, model };
 }
 
 export function extractJson(text) {
@@ -69,60 +133,17 @@ async function chatGemini(config, system, userPrompt) {
   return content;
 }
 
-let puterRuntime = null;
-
-async function getPuter() {
-  if (puterRuntime) return puterRuntime;
-  if (!env.ai.puter.enabled) throw new ApiError(500, 'Puter provider is disabled (PUTER_ENABLED=false)');
-  if (!env.ai.puter.authToken) {
-    throw new ApiError(
-      500,
-      'Puter provider requires PUTER_AUTH_TOKEN — create one at https://puter.com/dashboard'
-    );
-  }
-  const { init } = await import('@heyputer/puter.js/src/init.cjs');
-  puterRuntime = init(env.ai.puter.authToken);
-  return puterRuntime;
-}
-
-function chatContentToString(content) {
-  if (typeof content === 'string') return content;
-  if (content && typeof content.toString === 'function') {
-    const text = content.toString();
-    if (text && text !== '[object Object]') return text;
-  }
-  if (content && typeof content === 'object') {
-    const keys = ['text', 'content', 'message'];
-    for (const key of keys) {
-      if (typeof content[key] === 'string') return content[key];
-    }
-  }
-  return null;
-}
-
-async function chatPuter(config, system, userPrompt) {
-  const puter = await getPuter();
-  const response = await puter.ai.chat(
-    [
-      { role: 'system', content: system },
-      { role: 'user', content: userPrompt },
-    ],
-    { model: config.model }
-  );
-  const content =
-    chatContentToString(response?.message?.content) ||
-    chatContentToString(response?.content) ||
-    chatContentToString(response?.text) ||
-    chatContentToString(response);
-  if (!content) throw new ApiError(502, 'Empty Puter chat response');
-  return content;
-}
-
-export async function chatText({ kind = 'text', modelOverride, system, user }) {
-  const config = pickConfig(kind, modelOverride);
+export async function chatText({ kind = 'text', modelOverride, system, user, projectId, userId }) {
+  const config = await pickConfig(kind, modelOverride);
   if (config.provider === 'puter') {
-    const content = await chatPuter(config, system, user);
-    return { content, model: config.model };
+    const result = await requestAiJob({
+      projectId,
+      userId,
+      kind: 'plan',
+      payload: { systemPrompt: system, userPrompt: user },
+      model: config.model,
+    });
+    return { content: result.content, model: config.model };
   }
   if (!config.apiKey) throw new ApiError(500, `No API key configured for "${kind}" provider`);
   const content =
@@ -217,30 +238,6 @@ const imageAdapters = {
       return { url, width: image?.width || 1024, height: image?.height || 1024 };
     },
   },
-  puter: {
-    async generate(config, prompt, { aspectRatio }) {
-      const puter = await getPuter();
-      const result = await puter.ai.txt2img(prompt, {
-        model: config.model,
-        ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
-      });
-      let buffer = null;
-      if (result && typeof result.arrayBuffer === 'function') {
-        buffer = Buffer.from(await result.arrayBuffer());
-      } else if (result && typeof result.toBuffer === 'function') {
-        buffer = await result.toBuffer();
-      } else if (result && typeof result === 'object') {
-        if (result.buffer instanceof ArrayBuffer) buffer = Buffer.from(result.buffer);
-        else if (typeof result.source === 'string' && result.source.startsWith('data:')) {
-          buffer = Buffer.from(result.source.split(',')[1] || '', 'base64');
-        }
-      }
-      if (!buffer || buffer.length === 0) throw new ApiError(502, 'Puter txt2img returned no image data');
-      const width = result?.width || 1024;
-      const height = result?.height || 1024;
-      return { url: `data:image/png;base64,${buffer.toString('base64')}`, width, height };
-    },
-  },
 };
 
 const PREF_KEY = { image: 'imageModel', design: 'designModel', text: 'textModel' };
@@ -249,26 +246,45 @@ export async function resolveModelOverride(userId, kind, projectId) {
   if (!userId) return undefined;
   const key = PREF_KEY[kind] || 'textModel';
 
+  // only accept overrides that exist in the catalog as active models
+  // (paid OpenRouter models are deactivated and therefore ignored)
+  const isUsable = async (modelId) => {
+    if (!modelId || modelId === 'default') return false;
+    const ModelCatalog = (await import('../models/ModelCatalog.js')).ModelCatalog;
+    const found = await ModelCatalog.findOne({
+      modelId,
+      isActive: true,
+      $or: [{ provider: { $ne: 'openrouter' } }, { badge: 'free' }],
+    }).select('modelId');
+    return !!found;
+  };
+
   if (projectId) {
     const Project = (await import('../models/Project.js')).Project;
     const project = await Project.findById(projectId).select('modelOverrides').lean();
     const override = project?.modelOverrides?.[key];
-    if (override && override !== 'default') return override;
+    if (await isUsable(override)) return override;
   }
 
   const ModelPreference = (await import('../models/ModelPreference.js')).ModelPreference;
   const pref = await ModelPreference.findOne({ user: userId });
   if (!pref) return undefined;
   const value = pref[key];
-  if (value && value !== 'default') return value;
+  if (await isUsable(value)) return value;
   return undefined;
 }
 
-export async function generateImage({ modelOverride, prompt, negativePrompt, aspectRatio, seed }) {
-  const config = pickConfig('image', modelOverride);
+export async function generateImage({ modelOverride, prompt, negativePrompt, aspectRatio, seed, projectId, userId }) {
+  const config = await pickConfig('image', modelOverride);
   if (config.provider === 'puter') {
-    const result = await imageAdapters.puter.generate(config, prompt, { aspectRatio });
-    return { ...result, model: config.model };
+    const result = await requestAiJob({
+      projectId,
+      userId,
+      kind: 'image',
+      payload: { prompt, negativePrompt, aspectRatio },
+      model: config.model,
+    });
+    return { url: result.imageDataUrl, width: result.width || 1024, height: result.height || 1024, model: config.model };
   }
   if (!config.apiKey) throw new ApiError(500, 'No API key configured for image provider');
   const adapter = imageAdapters[config.provider] || imageAdapters['openai-compatible'];
@@ -324,18 +340,21 @@ async function visionGemini(config, prompt, imageUrl) {
   return text;
 }
 
-async function visionPuter(config, prompt, imageUrl) {
-  const puter = await getPuter();
-  const response = await puter.ai.chat(prompt, imageUrl, { model: config.model });
-  const content = chatContentToString(response?.message?.content) || chatContentToString(response?.content) || chatContentToString(response);
-  if (!content) throw new ApiError(502, 'Empty Puter vision response');
-  return content;
+async function visionPuter(config, prompt, imageUrl, projectId, userId) {
+  const result = await requestAiJob({
+    projectId,
+    userId,
+    kind: 'vision',
+    payload: { prompt, imageUrl },
+    model: config.model,
+  });
+  return result.content;
 }
 
-export async function analyzeImage({ imageUrl, prompt, modelOverride }) {
-  const config = pickConfig('vision', modelOverride);
+export async function analyzeImage({ imageUrl, prompt, modelOverride, projectId, userId }) {
+  const config = await pickConfig('vision', modelOverride);
   if (config.provider === 'puter') {
-    const content = await visionPuter(config, prompt, imageUrl);
+    const content = await visionPuter(config, prompt, imageUrl, projectId, userId);
     return { content, model: config.model };
   }
   if (!config.apiKey) throw new ApiError(500, 'No API key configured for vision provider');

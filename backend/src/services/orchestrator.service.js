@@ -14,11 +14,15 @@ export async function startPipeline(user, { prompt, platform, models }) {
 
   if (models && typeof models === 'object') {
     const patch = {};
-    if (models.text) patch.textModel = models.text;
-    if (models.image) patch.imageModel = models.image;
-    if (models.design) patch.designModel = models.design;
+    const text = models.textModel || models.text;
+    const image = models.imageModel || models.image;
+    const design = models.designModel || models.design;
+    if (text) patch.textModel = text;
+    if (image) patch.imageModel = image;
+    if (design) patch.designModel = design;
     if (Object.keys(patch).length) {
       await ModelPreference.findOneAndUpdate({ user: user._id }, patch, { upsert: true });
+      await Project.findByIdAndUpdate(project._id, { modelOverrides: patch });
     }
   }
 

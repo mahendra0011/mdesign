@@ -11,6 +11,7 @@ import uploadRoutes from './routes/upload.routes.js';
 import customiseRoutes from './routes/customise.routes.js';
 import modelsRoutes from './routes/models.routes.js';
 import integrationsRoutes from './routes/integrations.routes.js';
+import aiJobsRoutes from './routes/aiJobs.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.js';
 
 export function createApp() {
@@ -18,7 +19,7 @@ export function createApp() {
 
   app.disable('x-powered-by');
   app.use(cors({ origin: env.clientUrl, credentials: true }));
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '25mb' }));
   app.use(cookieParser());
   if (env.nodeEnv !== 'test') app.use(morgan('dev'));
 
@@ -31,6 +32,7 @@ export function createApp() {
   app.use('/api/customise', customiseRoutes);
   app.use('/api/models', modelsRoutes);
   app.use('/api/integrations', integrationsRoutes);
+  app.use('/api/ai-jobs', aiJobsRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
