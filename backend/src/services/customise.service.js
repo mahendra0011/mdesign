@@ -136,7 +136,7 @@ export function buildGenerateElementPrompt(prompt, elementType) {
 }
 
 export async function runElementGeneration(session, { prompt, elementType }) {
-  const { imageUrl } = await generateImage({
+  const { url: imageUrl } = await generateImage({
     prompt: buildGenerateElementPrompt(prompt, elementType),
     aspectRatio: '1:1',
     userId: session.user,
